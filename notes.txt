@@ -1,0 +1,25 @@
+To open notebook and start working:
+
+activate qk-photo-analysis
+cd <path to notebook folder>
+jupyter notebook
+
+
+conda install -c anaconda pip 
+conda install -c conda-forge matplotlib
+conda install -c anaconda jupyter
+conda install -c anaconda xlrd
+
+
+pip install tdt
+
+
+
+To make environment
+
+conda env export > environment.yml
+
+
+Excellent resource on Jupyter!
+
+https://www.dataquest.io/blog/jupyter-notebook-tips-tricks-shortcuts/

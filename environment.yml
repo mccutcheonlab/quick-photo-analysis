@@ -86,6 +86,7 @@ dependencies:
   - widgetsnbextension=3.4.2=py37_0
   - wincertstore=0.2=py37_0
   - winpty=0.4.3=4
+  - xlrd=1.2.0=py37_0
   - zeromq=4.3.1=h33f27b4_3
   - zlib=1.2.11=h62dcd97_3
   - pip:
