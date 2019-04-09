@@ -1,0 +1,6 @@
+name: qk-photo-analysis
+channels:
+  - anaconda-fusion
+  - defaults
+prefix: C:\ProgramData\Anaconda3\envs\qk-photo-analysis
+
