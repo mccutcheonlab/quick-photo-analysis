@@ -11,11 +11,18 @@ Helper functions for quick-photometry-analysis notebook
 import numpy as np
 import timeit
 import random
-import matplotlib.pyplot as plt
 import xlrd
 import csv
 import os
 
+import tdt
+
+import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+
+import JM_general_functions as jmf
+import JM_custom_figs as jmfig
 """
 this function makes 'snips' of a data file ('data' single scalar) aligned to an
 event of interest ('event', list of times in seconds).
@@ -33,7 +40,98 @@ class Session(object):
     
     def __init__(self, sessionID='Untitled session'):
         self.sessionID = sessionID
+        self.left = {}
+        self.right = {}
+        self.both = {}
+        
+    def set_tick(self):
+        try:
+            self.tick = self.ttls['Tick'].onset
+            print('Ticks set correctly.')
+        except:
+            print('Ticks not set - check that ticks are labeled correctly in tdt file.')    
+        
+    def time2samples(self):
+        maxsamples = len(self.tick)*int(self.fs)
+        if (len(self.data) - maxsamples) > 2*int(self.fs):
+            print('Something may be wrong with conversion from time to samples')
+            print(str(len(self.data) - maxsamples) + ' samples left over. This is more than double fs.')
+            self.t2sMap = np.linspace(min(self.tick), max(self.tick), maxsamples)
+        else:
+            self.t2sMap = np.linspace(min(self.tick), max(self.tick), maxsamples)
+            print('t2sMap made correctly.')
 
+    def event2sample(self, EOI):
+        idx = (np.abs(self.t2sMap - EOI)).argmin()   
+        return idx
+    
+    def check4events(self, trialL, lickL, trialR, lickR):
+        try:
+            lt = getattr(self.ttls, trialL)
+            self.left['exist'] = True
+            self.left['sipper'] = lt.onset
+            self.left['sipper_off'] = lt.offset
+            ll = getattr(self.ttls, lickL)
+            self.left['licks'] = np.array([i for i in ll.onset if i<max(self.left['sipper_off'])])
+            self.left['licks_off'] = ll.offset[:len(self.left['licks'])]
+            print('Events found on left')
+        except AttributeError:
+            self.left['exist'] = False
+            self.left['sipper'] = []
+            self.left['sipper_off'] = []
+            self.left['licks'] = []
+            self.left['licks_off'] = []
+            print('No events found on left')
+           
+        try:
+            rt = getattr(self.ttls, trialR)
+            self.right['exist'] = True
+            self.right['sipper'] = rt.onset
+            self.right['sipper_off'] = rt.offset
+            rl = getattr(self.ttls, lickR)
+            self.right['licks'] = np.array([i for i in rl.onset if i<max(self.right['sipper_off'])])
+            self.right['licks_off'] = rl.offset[:len(self.right['licks'])]
+            print('Events found on right')
+        except AttributeError:
+            self.right['exist'] = False
+            self.right['sipper'] = []
+            self.right['sipper_off'] = []
+            self.right['licks'] = []
+            self.right['licks_off'] = []
+            print('No events found on right')
+            
+        if self.left['exist'] == True and self.right['exist'] == True:
+            print('Events on both sides detected to also separating into forced choice and free choice')
+            try:
+                first = findfreechoice(self.left['sipper'], self.right['sipper'])
+                self.both['sipper'] = self.left['sipper'][first:]
+                self.both['sipper_off'] = self.left['sipper_off'][first:]
+                self.left['sipper'] = self.left['sipper'][:first-1]
+                self.left['sipper_off'] = self.left['sipper_off'][:first-1]
+                self.right['sipper'] = self.right['sipper'][:first-1]
+                self.right['sipper_off'] = self.right['sipper_off'][:first-1]
+                self.left['licks-forced'], self.left['licks-free'] = dividelicks(self.left['licks'], self.both['sipper'][0])
+                self.right['licks-forced'], self.right['licks-free'] = dividelicks(self.right['licks'], self.both['sipper'][0])
+                self.left['nlicks-forced'] = len(self.left['licks-forced'])
+                self.right['nlicks-forced'] = len(self.right['licks-forced'])
+                self.left['nlicks-free'] = len(self.left['licks-free'])
+                self.right['nlicks-free'] = len(self.right['licks-free'])
+
+            except IndexError:
+                print('Problem separating out free choice trials')
+        else:
+            self.left['licks-forced'] = self.left['licks']
+            self.right['licks-forced'] = self.right['licks']
+
+def findfreechoice(left, right):
+    first = [idx for idx, x in enumerate(left) if x in right][0]
+    return first
+        
+def dividelicks(licks, time):
+    before = [x for x in licks if x < time]
+    after = [x for x in licks if x > time]
+    
+    return before, after   
 
 def snipper(data, timelock, fs = 1, t2sMap = [], preTrial=10, trialLength=30,
                  adjustBaseline = True,
@@ -319,3 +417,132 @@ def lickCalc(licks, offset = [], burstThreshold = 0.25, runThreshold = 10,
         print('Problem making histograms of lick data')
         
     return lickData
+
+def calculate_lick_params(x, burstThreshold=0.5):
+    
+    print('Burst threshold set at', str(burstThreshold), 's')
+    
+    try:
+        x.left['lickdata'] = lickCalc(x.left['licks'],
+                          offset = x.left['licks_off'],
+                          burstThreshold=burstThreshold)
+        print('Parameters for left licks calculated...')
+        
+    except IndexError:
+        x.left['lickdata'] = 'none'
+        print('No left licks to calculate.')
+    
+    try:
+        x.right['lickdata'] = lickCalc(x.right['licks'],
+                  offset = x.right['licks_off'],
+                  burstThreshold=burstThreshold)
+        print('Parameters for right licks calculated...')
+        
+    except IndexError:
+        x.right['lickdata'] = 'none'
+        print('No right licks to calculate.')
+        
+def make_snips(x, bins=300):
+    
+    print('Number of bins=300')
+    
+    try:
+        x.randomevents = makerandomevents(120, max(x.tick)-120)
+        x.bgTrials, x.pps = snipper(x.data, x.randomevents,
+                                t2sMap=x.t2sMap, fs=x.fs, bins=bins)
+        print('Random events and background trials constructed (used for working out noise)')
+    except:
+        print('Unable to make rnadom events and/or background trials.')
+        
+    try:   
+        for side in [x.left, x.right]:   
+            if side['exist'] == True:
+                side['snips_sipper'] = mastersnipper(x, side['sipper'], peak_between_time=[0, 5])
+                side['snips_licks'] = mastersnipper(x, side['lickdata']['rStart'], peak_between_time=[0, 2])
+                try:
+                    timelock_events = [licks for licks in side['lickdata']['rStart'] if licks in side['licks-forced']]
+                    latency_events = side['sipper']
+                    side['snips_licks_forced'] = mastersnipper(x, timelock_events, peak_between_time=[0, 2],
+                                                                    latency_events=latency_events, latency_direction='pre')
+                except KeyError:
+                    pass
+                try:
+                    side['lats'] = jmf.latencyCalc(side['lickdata']['licks'], side['sipper'], cueoff=side['sipper_off'], lag=0)
+                except TypeError:
+                    print('Cannot work out latencies as there are lick and/or sipper values missing.')
+                    side['lats'] = []
+        print('Snips made successfully (I think).')
+    except:
+        print('Problem making snips')
+
+def sessionlicksFig(ax):
+    if x.left['exist'] == True:
+        licks = x.left['lickdata']['licks']
+        ax.hist(licks, range(0, 3600, 60), color=x.left['color'], alpha=0.4)          
+        yraster = [ax.get_ylim()[1]] * len(licks)
+        ax.scatter(licks, yraster, s=50, facecolors='none', edgecolors=x.left['color'])
+
+    if x.right['exist'] == True:
+        licks = x.right['lickdata']['licks']
+        ax.hist(licks, range(0, 3600, 60), color=x.right['color'], alpha=0.4)          
+        yraster = [ax.get_ylim()[1]] * len(licks)
+        ax.scatter(licks, yraster, s=50, facecolors='none', edgecolors=x.right['color'])           
+    
+    ax.set_xticks(np.multiply([0, 10, 20, 30, 40, 50, 60],60))
+    ax.set_xticklabels(['0', '10', '20', '30', '40', '50', '60'])
+    ax.set_xlabel('Time (min)')
+    ax.set_ylabel('Licks per min')
+    
+def behavFigsCol(gs1, col, side):
+    ax = plt.subplot(gs1[1, col])
+    jmfig.licklengthFig(ax, side['lickdata'], color=side['color'])
+    
+    ax = plt.subplot(gs1[2, col])
+    jmfig.iliFig(ax, side['lickdata'], color=side['color'])
+    
+    ax = plt.subplot(gs1[3, col])
+    jmfig.cuerasterFig(ax, side['sipper'], side['lickdata']['licks'])
+    
+def sessionFig(x, ax):
+    ax.plot(x.data, color='blue', linewidth=0.1)
+    try:
+        ax.plot(x.dataUV, color='m', linewidth=0.1)
+    except:
+        print('No UV data.')
+            
+    ax.set_xticks(np.multiply([0, 10, 20, 30, 40, 50, 60],60*x.fs))
+    ax.set_xticklabels(['0', '10', '20', '30', '40', '50', '60'])
+    ax.set_xlabel('Time (min)')
+    
+def photoFigsCol(gs1, col, pps, snips_sipper, snips_licks):
+    ax = plt.subplot(gs1[2, col])
+    jmfig.trialsFig(ax, snips_sipper['blue'], pps, noiseindex = snips_sipper['noise'],
+                    eventText = 'Sipper',
+                    ylabel = 'Delta F / F0')
+    
+    ax = plt.subplot(gs1[3, col])
+    jmfig.trialsMultShadedFig(ax, [snips_sipper['uv'], snips_sipper['blue']],
+                              pps, noiseindex = snips_sipper['noise'],
+                              eventText = 'Sipper')
+    
+    ax = plt.subplot(gs1[2, col+1])
+    jmfig.shadedError(ax, snips_sipper['blue_z'])
+    
+    ax = plt.subplot(gs1[4, col])
+    jmfig.trialsFig(ax, snips_licks['blue'], pps, noiseindex=snips_licks['noise'],
+                    eventText = 'First Lick',
+                    ylabel = 'Delta F / F0')
+    
+    ax = plt.subplot(gs1[5, col])
+    jmfig.trialsMultShadedFig(ax, [snips_licks['uv'], snips_licks['blue']],
+                              pps, noiseindex=snips_licks['noise'],
+                              eventText = 'First Lick')
+    
+    ax = plt.subplot(gs1[4, col+1])
+    jmfig.shadedError(ax, snips_licks['blue_z'])
+
+
+print('Importing required functions...')
+
+x = Session('Session to analyze')
+print('Initializing session...')
